@@ -1,0 +1,19 @@
+import paho.mqtt.client as mqtt_client
+from pykafka import KafkaClient
+import time
+mqtt_broker = "mqtt.eclipseprojects.io"
+mqtt_client = mqtt_client.Client("ivms_data_python_consumer")
+mqtt_client.connect(mqtt_broker)
+kafka_client = KafkaClient(hosts="localhost:9092")
+kafka_topic = kafka_client.topics['ivms-data-topic']
+kafka_producer = kafka_topic.get_sync_producer()
+def on_message(client, userdata, message):
+    msg_payload = str(message.payload)
+    print("Received MQTT message: ", msg_payload)
+    kafka_producer.produce(msg_payload.encode('ascii'))
+    print("KAFKA: Just published " + msg_payload + " to topic ivms-data-topic")
+mqtt_client.loop_start()
+mqtt_client.subscribe("ivmsdata")
+mqtt_client.on_message = on_message
+time.sleep(300)
+mqtt_client.loop_end()

@@ -1,0 +1,140 @@
+#!/usr/bin/env python
+# coding: utf-8
+
+# In[117]:
+
+
+get_ipython().system('pip install paho-mqtt')
+
+
+# In[7]:
+
+
+get_ipython().system('pip install faker')
+
+
+# In[119]:
+
+
+import pandas as pd
+import random
+from faker import Faker
+from random import uniform,randrange
+from datetime import datetime
+import time
+import paho.mqtt.client as mqtt
+
+
+# In[64]:
+
+
+nr_of_trucks = 15
+
+
+# In[130]:
+
+
+fake = Faker('en_US')
+trucks = []
+
+
+# In[131]:
+
+
+mqttBroker ="mqtt.eclipseprojects.io" 
+
+client = mqtt.Client("ivms_data_python_producer")
+client.connect(mqttBroker)
+
+
+# In[ ]:
+
+
+#for truck_id in range(nr_of_trucks):
+while True:
+    # Create transaction date 
+    d1 = datetime.strptime(f'1/1/2021 00:00:00.000000', '%m/%d/%Y %H:%M:%S.%f')
+    d2 = datetime.strptime(f'8/10/2021 23:59:59.000000', '%m/%d/%Y %H:%M:%S.%f')
+    
+    transaction_date = fake.date_time_between (d1, d2)
+
+    truck_id = fake.ean(length=8)
+
+    driver_id = fake.ean(length=8)
+    
+    route_name = fake.city()
+
+    latitude = fake.latitude()
+    
+    longitude = fake.longitude()
+    
+    fuel_level = random.choice(["Low", "Medium", "High"])
+
+    driver_condition_obd = random.choice(["Good", "Bad", "Average", "StopImmediately"])
+    
+    tire_pressure_psi = str(round(fake.pyfloat(right_digits=2, positive=True, min_value=1, max_value=100),2)).strip("0")
+
+    speed_kmhr = str(round(uniform(0,220),2)).strip("0")
+
+    trucks.append([transaction_date, truck_id, driver_id, route_name, latitude, longitude, fuel_level,driver_condition_obd,tire_pressure_psi,speed_kmhr])
+    
+    message = str(transaction_date) + ',' + str(truck_id) + ',' + str(driver_id) + ',' + str(route_name) + ',' + str(latitude) + ',' + str(longitude) + ',' + str(fuel_level) + ',' + str(driver_condition_obd) + ',' + str(tire_pressure_psi) + ',' + str(speed_kmhr)
+    client.publish("ivms_data", message)
+    time.sleep(1)
+    print("Published Message:",message)
+
+
+# In[114]:
+
+
+broker = 'mqtt.eclipseprojects.io'
+port = 1883
+topic = "ivms_data"
+client_id = 'ivms_data_python_consumer'
+
+def connect_mqtt() -> mqtt_client:
+    def on_connect(client, userdata, flags, rc):
+        if rc == 0:
+            print("Connected to MQTT Broker!")
+        else:
+            print("Failed to connect, return code %d\n", rc)
+
+    client = mqtt_client.Client(client_id)
+    #client.username_pw_set(username, password)
+    client.on_connect = on_connect
+    client.connect(broker, port)
+    print(client)
+    return client
+
+
+def subscribe(client: mqtt_client):
+    def on_message(client, userdata, msg):
+        print(f"Received `{msg.payload.decode()}` from `{msg.topic}` topic")
+
+    client.subscribe(topic)
+    
+    client.on_message = on_message
+
+
+def run():
+    client = connect_mqtt()
+    subscribe(client)
+    client.loop_forever()
+
+
+if __name__ == '__main__':
+    run()
+
+
+# In[ ]:
+
+
+trucks_df = pd.DataFrame(trucks, columns=['transaction_date','truck_id', 'driver_id','route_name','latitude', 'longitude','fuel_level','driver_condition_obd','tire_pressure_psi','speed_kmhr'])
+pd.pandas.set_option('display.max_columns', None)
+
+
+# In[116]:
+
+
+trucks_df.style
+

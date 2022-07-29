@@ -1,0 +1,23 @@
+from kafka import KafkaConsumer
+import boto
+from boto.kinesis.exceptions import ResourceInUseException
+import os
+import time
+
+stream_name='ivms_data'
+region='us-east-1'
+aws_profile='aws-kinesis'
+
+if aws_profile:
+    os.environ['AWS_PROFILE'] = aws_profile
+
+kinesis = boto.kinesis.connect_to_region(region)
+
+consumer = KafkaConsumer('ivms-data-topic',
+                         group_id='my-group',
+                         bootstrap_servers=['localhost:9092'])
+for message in consumer:
+    print ("%s:%d:%d: key=%s value=%s" % (message.topic, message.partition,
+                                          message.offset, message.key,
+                                          message.value))
+    kinesis.put_record(stream_name, message.value, 'ivms_live_partition')
