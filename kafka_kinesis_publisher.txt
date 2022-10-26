@@ -1,23 +1,146 @@
-from kafka import KafkaConsumer
-import boto
-from boto.kinesis.exceptions import ResourceInUseException
-import os
-import time
+#!/usr/bin/env python
+# python3.6
 
-stream_name='ivms_data'
-region='us-east-1'
-aws_profile='aws-kinesis'
+import random
+from io import StringIO 
+from paho.mqtt import client as mqtt_client
+import pandas as pd
+from math import sin, cos, sqrt, atan2, radians
 
-if aws_profile:
-    os.environ['AWS_PROFILE'] = aws_profile
+pd.options.mode.chained_assignment = None 
+broker = 'mqtt.eclipseprojects.io'
+port = 1883
+topic = "mfr_poc_vitals"
+client_id = 'mfr_poc_publisher'
+mqttBroker ="mqtt.eclipseprojects.io"
+# generate client ID with pub prefix randomly
+client_id = f'python-mqtt-{random.randint(0, 100)}'
+client = mqtt_client.Client(client_id)
+counter = 0
+consumed_data = ""
+def connect_mqtt() -> mqtt_client:
+	def on_connect(client, userdata, flags, rc):
+		if rc == 0:
+			print("Connected to MQTT Broker!")
+		else:
+			print("Failed to connect, return code %d\n", rc)
+    #client.username_pw_set(username, password)
+	client.on_connect = on_connect
+	client.connect(broker, port)
+	return client
 
-kinesis = boto.kinesis.connect_to_region(region)
+def set_flag(row):
+	if float(row['heartbeat']) < 60:
+		return 1
+	elif float(row['temperature']) > 102:
+		return 1
+	elif float(row['spo2']) < 90:
+		return 1
+	else:
+		return 0
 
-consumer = KafkaConsumer('ivms-data-topic',
-                         group_id='my-group',
-                         bootstrap_servers=['localhost:9092'])
-for message in consumer:
-    print ("%s:%d:%d: key=%s value=%s" % (message.topic, message.partition,
-                                          message.offset, message.key,
-                                          message.value))
-    kinesis.put_record(stream_name, message.value, 'ivms_live_partition')
+def Distance(mfr1_lat, mfr1_lon, mfr2_lat, mfr2_lon):
+	# approximate radius of earth in km
+	R = 6373.0
+
+	lat1 = radians(float(mfr1_lat))
+	lon1 = radians(float(mfr1_lon))
+	lat2 = radians(float(mfr2_lat))
+	lon2 = radians(float(mfr2_lon))
+
+	dlon = lon2 - lon1
+	dlat = lat2 - lat1
+	a = sin(dlat / 2)**2 + cos(lat1) * cos(lat2) * sin(dlon / 2)**2
+	c = 2 * atan2(sqrt(a), sqrt(1 - a))
+	distance = R * c
+	return distance
+
+
+def closest(df):
+	fr_needs_help = df[df['vital_drop'] == 1]
+	print("First Responder who needs help: ")
+	print(fr_needs_help)
+	fr_others = df[df['vital_drop'] != 1]
+	#print("**")
+	#print(fr_others)
+	needs_help_latitude = fr_needs_help.loc[fr_needs_help.vital_drop == 1, 'latitude']
+	needs_help_longitude = fr_needs_help.loc[fr_needs_help.vital_drop == 1, 'longitude']
+	'''
+	for i in range(len(fr_others)):
+		print("others")
+		k = fr_others.loc[i, 'latitude']
+		print(k)
+		#print(fr_others.loc[i, 'latitude'])
+		print(r_others.loc[i, 'longitude'])
+		print("#######")
+	
+	for ind in fr_others.index:
+		k = fr_others[ind]['latitude']
+		print("###")
+		print(k)
+	'''
+	#fr_others['distance_from_fr_needing_help'] = fr_others[['latitude','longitude']].apply(lambda x: Distance(x.latitude,x.longitude,needs_help_latitude,needs_help_longitude), axis = 1)
+	fr_others['distance_from_fr_needing_help'] = fr_others.apply(lambda x: Distance(x.latitude,x.longitude,needs_help_latitude,needs_help_longitude), axis = 1)
+	print("Distance between other First responders and the one in distress")
+	print(fr_others)
+	#df.loc[df['B'] == 3, 'A']
+	closest_mfr_id = fr_others.loc[fr_others['distance_from_fr_needing_help'] == fr_others['distance_from_fr_needing_help'].min(), 'FirstResponder_ID']
+	print("Closest First Responder who can help: ")
+	#print(closest_mfr_id)
+	print(closest_mfr_id)
+	print("**********************************************************")
+	#print("@@@@@@@@@@@@")
+	#return '0002'
+
+def subscribe(client: mqtt_client):
+	def on_message(client, userdata, msg):
+		global counter
+		global consumed_data
+		#print(f"Received `{msg.payload.decode()}` from `{msg.topic}` topic")
+		consumed_data += msg.payload.decode() + "\n"
+		#print(consumed_data)
+		counter +=1
+		#print(counter)
+		if (counter%3 == 0):
+			df = pd.DataFrame([x.split(',') for x in consumed_data.rstrip('\n').split('\n')],columns=['current_timestamp','Disaster_ID','FirstResponder_ID','latitude','longitude','heartbeat','temperature','spo2'])
+			consumed_data = ""
+			#print(df)
+			'''
+			df['vital_drop'] = df['heartbeat'].apply(lambda x: 1 if float(x)<60 else None)
+			df['vital_drop'] = df['temperature'].apply(lambda x: 1 if float(x) > 102 else None)
+			df['vital_drop'] = df['spo2'].apply(lambda x: 1 if float(x) < 90 else None)
+			print(df)
+			'''
+			df_with_flag = df.assign(vital_drop = df.apply(set_flag, axis = 1))
+			#print(df_with_flag)
+			#groupby_time = df.groupby('current_timestamp')
+			is_vital_drop = df_with_flag.groupby('current_timestamp')['vital_drop'].max()
+
+			#df_with_flag['is_vital_drop'] = df_with_flag['vital_drop'].eq(df_with_flag.groupby('current_timestamp').vital_drop.transform('max')).astype(int)
+			'''print("***")
+			print(df_with_flag)
+			if (df_with_flag['is_vital_drop'] == 1):
+				print("in if")
+			else:
+				pass
+			#print groupby_time'''
+			if 1 in df_with_flag.vital_drop.values:
+				print("ALERT! A First Responder's vitals are dropping!")
+				closest_first_responder_id = closest(df_with_flag)
+				print(closest_first_responder_id)
+				#call fn to find closest 
+			else:
+				print("No alerts")
+				print("**********************************************************")
+				pass
+	client.subscribe(topic)
+	client.on_message = on_message
+
+def run():
+	client = connect_mqtt()
+	subscribe(client)
+	client.loop_forever()
+
+
+if __name__ == '__main__':
+	run()
