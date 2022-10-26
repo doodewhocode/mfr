@@ -1,19 +1,144 @@
-import paho.mqtt.client as mqtt_client
-from pykafka import KafkaClient
+#!/usr/bin/env python
+# coding: utf-8
+
+# In[117]:
+
+#Datagen.py
+#get_ipython().system('pip install paho-mqtt')
+
+
+# In[7]:
+
+
+#get_ipython().system('pip install faker')
+
+
+# In[119]:
+
+
+import pandas as pd
+import random
+from faker import Faker
+from random import uniform,randrange
+from datetime import datetime
 import time
-mqtt_broker = "mqtt.eclipseprojects.io"
-mqtt_client = mqtt_client.Client("ivms_data_python_consumer")
-mqtt_client.connect(mqtt_broker)
-kafka_client = KafkaClient(hosts="localhost:9092")
-kafka_topic = kafka_client.topics['ivms-data-topic']
-kafka_producer = kafka_topic.get_sync_producer()
-def on_message(client, userdata, message):
-    msg_payload = str(message.payload)
-    print("Received MQTT message: ", msg_payload)
-    kafka_producer.produce(msg_payload.encode('ascii'))
-    print("KAFKA: Just published " + msg_payload + " to topic ivms-data-topic")
-mqtt_client.loop_start()
-mqtt_client.subscribe("ivmsdata")
-mqtt_client.on_message = on_message
-time.sleep(300)
-mqtt_client.loop_end()
+import paho.mqtt.client as mqtt
+import math
+#pip install paho-mqtt / for mqtt testing
+#pip install pycristoforo - for random lat/long within an area
+#import paho.mqtt.client as mqtt
+broker = 'mqtt.eclipseprojects.io'
+port = 1883
+topic = "mfr_poc_vitals"
+client_id = 'mfr_poc_publisher'
+mqttBroker ="mqtt.eclipseprojects.io" 
+
+client = mqtt.Client("mfr_poc_datagen_producer")
+client.connect(mqttBroker)
+
+def generate_lat_long(lat, lon):
+	radius = 0.01
+	N = 20 
+
+	circlePoints = []
+	for k in range(N):
+		angle = math.pi*2*k/N
+		dx = radius*math.cos(angle)
+		dy = radius*math.sin(angle)
+		point = {}
+		point['lat']= lat + (180/math.pi)*(dy/6371) #Earth Radius
+		point['lon']= lon + (180/math.pi)*(dx/6371)/math.cos(lon*math.pi/180) #Earth Radius
+		circlePoints.append(point)
+		#print(type(point))
+		#print(type(circlePoints))
+
+	return circlePoints
+# In[64]:
+lat_long_center_mfr1 = [41.724600,-71.578927]
+lat_long_center_mfr2 = [41.716716,-71.592586]
+lat_long_center_mfr3 = [41.725880, -71.595608]
+
+lat_long_mfr1 = generate_lat_long(lat_long_center_mfr1[0], lat_long_center_mfr1[1])
+lat_long_mfr2 = generate_lat_long(lat_long_center_mfr2[0], lat_long_center_mfr2[1])
+lat_long_mfr3 = generate_lat_long(lat_long_center_mfr3[0], lat_long_center_mfr3[1])
+
+#print(lat_long_mfr1)
+#print("***")
+#current_timestamp,Disaster_ID,FirstResponder_ID,latitude,longitude,heartbeat,temperature,spo2
+number_of_fields = 8
+
+fake = Faker('en_US')
+counter = 0
+while True:
+    # Create transaction date 
+#    current_timestamp = datetime.datetime.now()
+	current_timestamp = datetime.now()
+#d2 = datetime.strptime(f'8/10/2021 23:59:59.000000', '%m/%d/%Y %H:%M:%S.%f')
+	Disaster_ID = datetime.today().strftime("%d%m%Y") + "_" + "001"
+
+	for id in ["0001","0002","0003"]:
+		FirstResponder_ID = id
+		if FirstResponder_ID == "0001" :
+# lets keep a counter, for a  prime number send alert for distress
+#else lest do based on vitals alone
+#sleep for a min
+			index = random.randint(0, 9)
+			latitude = lat_long_mfr1[index]['lat']
+			longitude = lat_long_mfr1[index]['lon']
+			if (counter%3 == 0):
+			#time to send drop in vitals
+				heartbeat = random.randint(50,60)
+				temperature = round(random.uniform(102.0,104.0),2)
+				spo2 = round(random.uniform(50.0,80.0),2)
+			else:
+				heartbeat = random.randint(60,80)
+				temperature = round(random.uniform(97.0,100.0),2)
+				spo2 = round(random.uniform(95.0,100.0),2)
+		else:
+			if FirstResponder_ID == "0002" :
+				index = random.randint(0, 9)
+				latitude = lat_long_mfr2[index]['lat']
+				longitude = lat_long_mfr2[index]['lon']
+			else:
+				index = random.randint(0, 9)
+				latitude = lat_long_mfr3[index]['lat']
+				longitude = lat_long_mfr3[index]['lon']
+			heartbeat = random.randint(60,80)
+			temperature = round(random.uniform(97.0,100.0),2)
+			spo2 = round(random.uniform(95.0,100.0),2)
+
+		sensor_data = str(current_timestamp) + ',' + str(Disaster_ID) + ',' + str(FirstResponder_ID) + ',' + str(latitude) + ',' + str(longitude) + ',' + str(heartbeat) + ',' + str(temperature) + ',' + str(spo2)  
+		print(sensor_data)
+		client.publish("mfr_poc_vitals", sensor_data)
+
+	time.sleep(2)
+	counter += 1
+	print(counter)
+#lat long - within radius
+def connect_mqtt() -> mqtt_client:
+	def on_connect(client, userdata, flags, rc):
+		if rc == 0:
+			print("Connected to MQTT Broker!")
+		else:
+			print("Failed to connect, return code %d\n", rc)
+
+	client = mqtt_client.Client(client_id)
+	client.on_connect = on_connect
+	client.connect(broker, port)
+	print(client)
+	return client
+
+def subscribe(client: mqtt_client):
+	def on_message(client, userdata, msg):
+		print(f"Received `{msg.payload.decode()}` from `{msg.topic}` topic")
+
+	client.subscribe(topic)
+	client.on_message = on_message
+
+def run():
+	client = connect_mqtt()
+	subscribe(client)
+	client.loop_forever()
+
+if __name__ == '__main__':
+	run()
