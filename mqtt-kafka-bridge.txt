@@ -27,11 +27,11 @@ import math
 #pip install paho-mqtt / for mqtt testing
 #pip install pycristoforo - for random lat/long within an area
 #import paho.mqtt.client as mqtt
-broker = 'mqtt.eclipseprojects.io'
+broker = 'broker.emqx.io'
 port = 1883
 topic = "mfr_poc_vitals"
 client_id = 'mfr_poc_publisher'
-mqttBroker ="mqtt.eclipseprojects.io" 
+mqttBroker = "broker.emqx.io"
 
 client = mqtt.Client("mfr_poc_datagen_producer")
 client.connect(mqttBroker)
