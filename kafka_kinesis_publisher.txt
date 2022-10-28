@@ -8,11 +8,11 @@ import pandas as pd
 from math import sin, cos, sqrt, atan2, radians
 
 pd.options.mode.chained_assignment = None 
-broker = 'mqtt.eclipseprojects.io'
+broker = 'broker.emqx.io'
 port = 1883
 topic = "mfr_poc_vitals"
 client_id = 'mfr_poc_publisher'
-mqttBroker ="mqtt.eclipseprojects.io"
+mqttBroker ="broker.emqx.io"
 # generate client ID with pub prefix randomly
 client_id = f'python-mqtt-{random.randint(0, 100)}'
 client = mqtt_client.Client(client_id)
