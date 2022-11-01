@@ -4,13 +4,13 @@
 # In[117]:
 
 
-get_ipython().system('pip install paho-mqtt')
+#get_ipython().system('pip install paho-mqtt')
 
 
 # In[7]:
 
 
-get_ipython().system('pip install faker')
+#get_ipython().system('pip install faker')
 
 
 # In[119]:
@@ -22,119 +22,197 @@ from faker import Faker
 from random import uniform,randrange
 from datetime import datetime
 import time
-import paho.mqtt.client as mqtt
+import math
+#pip install paho-mqtt / for mqtt testing
+#pip install pycristoforo - for random lat/long within an area
+#import paho.mqtt.client as mqtt
+from io import StringIO 
+import pandas as pd
+from math import sin, cos, sqrt, atan2, radians
 
 
+counter = 0
+consumed_data = ""
+
+def set_flag(row):
+	if float(row['heartbeat']) < 60:
+		return 1
+	elif float(row['temperature']) > 102:
+		return 1
+	elif float(row['spo2']) < 90:
+		return 1
+	else:
+		return 0
+
+def Distance(mfr1_lat, mfr1_lon, mfr2_lat, mfr2_lon):
+	# approximate radius of earth in km
+	R = 6373.0
+
+	lat1 = radians(float(mfr1_lat))
+	lon1 = radians(float(mfr1_lon))
+	lat2 = radians(float(mfr2_lat))
+	lon2 = radians(float(mfr2_lon))
+
+	dlon = lon2 - lon1
+	dlat = lat2 - lat1
+	a = sin(dlat / 2)**2 + cos(lat1) * cos(lat2) * sin(dlon / 2)**2
+	c = 2 * atan2(sqrt(a), sqrt(1 - a))
+	distance = R * c
+	return distance
+
+
+def closest(df):
+	fr_needs_help = df[df['vital_drop'] == 1]
+	print("First Responder who needs help: ")
+	print(fr_needs_help)
+	fr_others = df[df['vital_drop'] != 1]
+	#print("**")
+	#print(fr_others)
+	needs_help_latitude = fr_needs_help.loc[fr_needs_help.vital_drop == 1, 'latitude']
+	needs_help_longitude = fr_needs_help.loc[fr_needs_help.vital_drop == 1, 'longitude']
+	'''
+	for i in range(len(fr_others)):
+		print("others")
+		k = fr_others.loc[i, 'latitude']
+		print(k)
+		#print(fr_others.loc[i, 'latitude'])
+		print(r_others.loc[i, 'longitude'])
+		print("#######")
+	
+	for ind in fr_others.index:
+		k = fr_others[ind]['latitude']
+		print("###")
+		print(k)
+	'''
+	#fr_others['distance_from_fr_needing_help'] = fr_others[['latitude','longitude']].apply(lambda x: Distance(x.latitude,x.longitude,needs_help_latitude,needs_help_longitude), axis = 1)
+	fr_others['distance_from_fr_needing_help'] = fr_others.apply(lambda x: Distance(x.latitude,x.longitude,needs_help_latitude,needs_help_longitude), axis = 1)
+	print("Distance between other First responders and the one in distress")
+	print(fr_others)
+	#df.loc[df['B'] == 3, 'A']
+	closest_mfr_id = fr_others.loc[fr_others['distance_from_fr_needing_help'] == fr_others['distance_from_fr_needing_help'].min(), 'FirstResponder_ID']
+	print("Closest First Responder who can help: ")
+	#print(closest_mfr_id)
+	print(closest_mfr_id)
+	print("**********************************************************")
+	#print("@@@@@@@@@@@@")
+	#return '0002'
+
+def stitchdata(ipmsg):
+    global counter
+    global consumed_data
+    consumed_data += ipmsg + "\n"
+    #print(consumed_data)
+    counter +=1
+    #print(counter)
+    if (counter%3 == 0):
+            df = pd.DataFrame([x.split(',') for x in consumed_data.rstrip('\n').split('\n')],columns=['current_timestamp','Disaster_ID','FirstResponder_ID','latitude','longitude','heartbeat','temperature','spo2'])
+            consumed_data = ""
+            #print(df)
+            '''
+            df['vital_drop'] = df['heartbeat'].apply(lambda x: 1 if float(x)<60 else None)
+            df['vital_drop'] = df['temperature'].apply(lambda x: 1 if float(x) > 102 else None)
+            df['vital_drop'] = df['spo2'].apply(lambda x: 1 if float(x) < 90 else None)
+            print(df)
+            '''
+            df_with_flag = df.assign(vital_drop = df.apply(set_flag, axis = 1))
+            #print(df_with_flag)
+            #groupby_time = df.groupby('current_timestamp')
+            is_vital_drop = df_with_flag.groupby('current_timestamp')['vital_drop'].max()
+
+            #df_with_flag['is_vital_drop'] = df_with_flag['vital_drop'].eq(df_with_flag.groupby('current_timestamp').vital_drop.transform('max')).astype(int)
+            '''print("***")
+            print(df_with_flag)
+            if (df_with_flag['is_vital_drop'] == 1):
+                    print("in if")
+            else:
+                    pass
+            #print groupby_time'''
+            if 1 in df_with_flag.vital_drop.values:
+                    print("ALERT! A First Responder's vitals are dropping!")
+                    closest_first_responder_id = closest(df_with_flag)
+                    print(closest_first_responder_id)
+                    #call fn to find closest 
+            else:
+                    print("No alerts")
+                    print("**********************************************************")
+                    pass
+def generate_lat_long(lat, lon):
+	radius = 0.01
+	N = 20 
+
+	circlePoints = []
+	for k in range(N):
+		angle = math.pi*2*k/N
+		dx = radius*math.cos(angle)
+		dy = radius*math.sin(angle)
+		point = {}
+		point['lat']= lat + (180/math.pi)*(dy/6371) #Earth Radius
+		point['lon']= lon + (180/math.pi)*(dx/6371)/math.cos(lon*math.pi/180) #Earth Radius
+		circlePoints.append(point)
+		#print(type(point))
+		#print(type(circlePoints))
+
+	return circlePoints
 # In[64]:
+lat_long_center_mfr1 = [41.724600,-71.578927]
+lat_long_center_mfr2 = [41.716716,-71.592586]
+lat_long_center_mfr3 = [41.725880, -71.595608]
 
+lat_long_mfr1 = generate_lat_long(lat_long_center_mfr1[0], lat_long_center_mfr1[1])
+lat_long_mfr2 = generate_lat_long(lat_long_center_mfr2[0], lat_long_center_mfr2[1])
+lat_long_mfr3 = generate_lat_long(lat_long_center_mfr3[0], lat_long_center_mfr3[1])
 
-nr_of_trucks = 15
-
-
-# In[130]:
-
+#print(lat_long_mfr1)
+#print("***")
+#current_timestamp,Disaster_ID,FirstResponder_ID,latitude,longitude,heartbeat,temperature,spo2
+number_of_fields = 8
 
 fake = Faker('en_US')
-trucks = []
-
-
-# In[131]:
-
-
-mqttBroker ="mqtt.eclipseprojects.io" 
-
-client = mqtt.Client("ivms_data_python_producer")
-client.connect(mqttBroker)
-
-
-# In[ ]:
-
-
-#for truck_id in range(nr_of_trucks):
+counter = 0
 while True:
     # Create transaction date 
-    d1 = datetime.strptime(f'1/1/2021 00:00:00.000000', '%m/%d/%Y %H:%M:%S.%f')
-    d2 = datetime.strptime(f'8/10/2021 23:59:59.000000', '%m/%d/%Y %H:%M:%S.%f')
-    
-    transaction_date = fake.date_time_between (d1, d2)
+#    current_timestamp = datetime.datetime.now()
+	current_timestamp = datetime.now()
+#d2 = datetime.strptime(f'8/10/2021 23:59:59.000000', '%m/%d/%Y %H:%M:%S.%f')
+	Disaster_ID = datetime.today().strftime("%d%m%Y") + "_" + "001"
 
-    truck_id = fake.ean(length=8)
+	for id in ["0001","0002","0003"]:
+		FirstResponder_ID = id
+		if FirstResponder_ID == "0001" :
+# lets keep a counter, for a  prime number send alert for distress
+#else lest do based on vitals alone
+#sleep for a min
+			index = random.randint(0, 9)
+			latitude = lat_long_mfr1[index]['lat']
+			longitude = lat_long_mfr1[index]['lon']
+			if (counter%3 == 0):
+			#time to send drop in vitals
+				heartbeat = random.randint(50,60)
+				temperature = round(random.uniform(102.0,104.0),2)
+				spo2 = round(random.uniform(50.0,80.0),2)
+			else:
+				heartbeat = random.randint(60,80)
+				temperature = round(random.uniform(97.0,100.0),2)
+				spo2 = round(random.uniform(95.0,100.0),2)
+		else:
+			if FirstResponder_ID == "0002" :
+				index = random.randint(0, 9)
+				latitude = lat_long_mfr2[index]['lat']
+				longitude = lat_long_mfr2[index]['lon']
+			else:
+				index = random.randint(0, 9)
+				latitude = lat_long_mfr3[index]['lat']
+				longitude = lat_long_mfr3[index]['lon']
+			heartbeat = random.randint(60,80)
+			temperature = round(random.uniform(97.0,100.0),2)
+			spo2 = round(random.uniform(95.0,100.0),2)
 
-    driver_id = fake.ean(length=8)
-    
-    route_name = fake.city()
+		sensor_data = str(current_timestamp) + ',' + str(Disaster_ID) + ',' + str(FirstResponder_ID) + ',' + str(latitude) + ',' + str(longitude) + ',' + str(heartbeat) + ',' + str(temperature) + ',' + str(spo2)  
+		#print(sensor_data)
+		#client.publish("mfr_poc_vitals", sensor_data)
+		stitchdata(sensor_data)
 
-    latitude = fake.latitude()
-    
-    longitude = fake.longitude()
-    
-    fuel_level = random.choice(["Low", "Medium", "High"])
-
-    driver_condition_obd = random.choice(["Good", "Bad", "Average", "StopImmediately"])
-    
-    tire_pressure_psi = str(round(fake.pyfloat(right_digits=2, positive=True, min_value=1, max_value=100),2)).strip("0")
-
-    speed_kmhr = str(round(uniform(0,220),2)).strip("0")
-
-    trucks.append([transaction_date, truck_id, driver_id, route_name, latitude, longitude, fuel_level,driver_condition_obd,tire_pressure_psi,speed_kmhr])
-    
-    message = str(transaction_date) + ',' + str(truck_id) + ',' + str(driver_id) + ',' + str(route_name) + ',' + str(latitude) + ',' + str(longitude) + ',' + str(fuel_level) + ',' + str(driver_condition_obd) + ',' + str(tire_pressure_psi) + ',' + str(speed_kmhr)
-    client.publish("ivms_data", message)
-    time.sleep(1)
-    print("Published Message:",message)
-
-
-# In[114]:
-
-
-broker = 'mqtt.eclipseprojects.io'
-port = 1883
-topic = "ivms_data"
-client_id = 'ivms_data_python_consumer'
-
-def connect_mqtt() -> mqtt_client:
-    def on_connect(client, userdata, flags, rc):
-        if rc == 0:
-            print("Connected to MQTT Broker!")
-        else:
-            print("Failed to connect, return code %d\n", rc)
-
-    client = mqtt_client.Client(client_id)
-    #client.username_pw_set(username, password)
-    client.on_connect = on_connect
-    client.connect(broker, port)
-    print(client)
-    return client
-
-
-def subscribe(client: mqtt_client):
-    def on_message(client, userdata, msg):
-        print(f"Received `{msg.payload.decode()}` from `{msg.topic}` topic")
-
-    client.subscribe(topic)
-    
-    client.on_message = on_message
-
-
-def run():
-    client = connect_mqtt()
-    subscribe(client)
-    client.loop_forever()
-
-
-if __name__ == '__main__':
-    run()
-
-
-# In[ ]:
-
-
-trucks_df = pd.DataFrame(trucks, columns=['transaction_date','truck_id', 'driver_id','route_name','latitude', 'longitude','fuel_level','driver_condition_obd','tire_pressure_psi','speed_kmhr'])
-pd.pandas.set_option('display.max_columns', None)
-
-
-# In[116]:
-
-
-trucks_df.style
-
+	time.sleep(2)
+	counter += 1
+	#print(counter)
+#lat long - within radius
