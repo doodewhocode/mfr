@@ -28,8 +28,11 @@ import math
 #import paho.mqtt.client as mqtt
 from io import StringIO 
 import pandas as pd
-from math import sin, cos, sqrt, atan2, radians
+from math import cos, sin, atan2, sqrt, radians, degrees, asin, modf
+#from geographiclib.geodesic import Geodesic
 
+import warnings
+warnings.filterwarnings("ignore")
 
 counter = 0
 consumed_data = ""
@@ -61,15 +64,67 @@ def Distance(mfr1_lat, mfr1_lon, mfr2_lat, mfr2_lon):
 	return distance
 
 
+def getPathLength(lat1,lng1,lat2,lng2):
+    '''calculates the distance between two lat, long coordinate pairs'''
+    R = 6371000 # radius of earth in m
+    lat1rads = radians(lat1)
+    lat2rads = radians(lat2)
+    deltaLat = radians((lat2-lat1))
+    deltaLng = radians((lng2-lng1))
+    a = sin(deltaLat/2) * sin(deltaLat/2) + cos(lat1rads) * cos(lat2rads) * sin(deltaLng/2) * sin(deltaLng/2)
+    c = 2 * atan2(sqrt(a), sqrt(1-a))
+    d = R * c
+    return d
+
+def getDestinationLatLong(lat,lng,azimuth,distance):
+    '''returns the lat an long of destination point 
+    given the start lat, long, aziuth, and distance'''
+    R = 6378.1 #Radius of the Earth in km
+    brng = radians(azimuth) #Bearing is degrees converted to radians.
+    d = distance/1000 #Distance m converted to km
+    lat1 = radians(lat) #Current dd lat point converted to radians
+    lon1 = radians(lng) #Current dd long point converted to radians
+    lat2 = asin( sin(lat1) * cos(d/R) + cos(lat1)* sin(d/R)* cos(brng))
+    lon2 = lon1 + atan2(sin(brng) * sin(d/R)* cos(lat1),cos(d/R)- sin(lat1)* sin(lat2))
+    #convert back to degrees
+    lat2 = degrees(lat2)
+    lon2 = degrees(lon2)
+    return[lat2, lon2]
+
+def getStraightline(interval,azimuth,lat1,lng1,lat2,lng2):
+    '''returns every coordinate pair inbetween two coordinate pairs given the desired interval'''
+    coords = []
+    d = getPathLength(lat1,lng1,lat2,lng2)
+    remainder, dist = modf((d / interval))
+    counter = 1.0
+    coords.append([lat1,lng1])
+    for distance in range(1,int(dist)):
+        c = getDestinationLatLong(lat1,lng1,azimuth,counter)
+        counter += 1.0
+        coords.append(c)
+    counter +=1
+    coords.append([lat2,lng2])
+    print("<Start> Tracking First Responder going to help: ")
+    for i in coords:
+    	print("Current Location: ",i)
+    	time.sleep(1)
+    print("<End> Reached the location on First Responder in need of help!!!")
+    return coords
+
+
+#def get_bearing(lat1, lat2, long1, long2):
+#    brng = Geodesic.WGS84.Inverse(lat1, long1, lat2, long2)['azi1']
+#    return brng
+
 def closest(df):
 	fr_needs_help = df[df['vital_drop'] == 1]
-	print("First Responder who needs help: ")
-	print(fr_needs_help)
+	print("First Responder who needs help --> ID :: ", fr_needs_help['FirstResponder_ID'].to_string(index=False), " ~ Location :: (",fr_needs_help['latitude'].to_string(index=False),",",fr_needs_help['longitude'].to_string(index=False),")")
 	fr_others = df[df['vital_drop'] != 1]
 	#print("**")
 	#print(fr_others)
-	needs_help_latitude = fr_needs_help.loc[fr_needs_help.vital_drop == 1, 'latitude']
-	needs_help_longitude = fr_needs_help.loc[fr_needs_help.vital_drop == 1, 'longitude']
+	#print(fr_needs_help)
+	needs_help_latitude = float(fr_needs_help.loc[fr_needs_help.vital_drop == 1, 'latitude'].to_string(index=False))
+	needs_help_longitude = float(fr_needs_help.loc[fr_needs_help.vital_drop == 1, 'longitude'].to_string(index=False))
 	'''
 	for i in range(len(fr_others)):
 		print("others")
@@ -86,16 +141,27 @@ def closest(df):
 	'''
 	#fr_others['distance_from_fr_needing_help'] = fr_others[['latitude','longitude']].apply(lambda x: Distance(x.latitude,x.longitude,needs_help_latitude,needs_help_longitude), axis = 1)
 	fr_others['distance_from_fr_needing_help'] = fr_others.apply(lambda x: Distance(x.latitude,x.longitude,needs_help_latitude,needs_help_longitude), axis = 1)
-	print("Distance between other First responders and the one in distress")
-	print(fr_others)
+	#fr_others.loc['distance_from_fr_needing_help'] = fr_others.apply(lambda x: Distance(x.latitude,x.longitude,needs_help_latitude,needs_help_longitude), axis = 1)
+	#print("Distance between other First responders and the one in distress: ",fr_others)
 	#df.loc[df['B'] == 3, 'A']
-	closest_mfr_id = fr_others.loc[fr_others['distance_from_fr_needing_help'] == fr_others['distance_from_fr_needing_help'].min(), 'FirstResponder_ID']
-	print("Closest First Responder who can help: ")
-	#print(closest_mfr_id)
-	print(closest_mfr_id)
-	print("**********************************************************")
+	closest_mfr_id = fr_others.loc[fr_others['distance_from_fr_needing_help'] == fr_others['distance_from_fr_needing_help'].min(), 'FirstResponder_ID'].to_string(index=False)
+	lend_help_latitude = float(fr_others.loc[fr_others['distance_from_fr_needing_help'] == fr_others['distance_from_fr_needing_help'].min(), 'latitude'].iloc[0])#.to_string(index=False))
+	lend_help_longitude = float(fr_others.loc[fr_others['distance_from_fr_needing_help'] == fr_others['distance_from_fr_needing_help'].min(), 'longitude'].iloc[0])#.to_string(index=False))
+
+	print("Closest First Responder who can help --> ID :: ",closest_mfr_id, " ~ Location :: (", lend_help_latitude,",",lend_help_longitude,")")#.to_string(index=False))
+	
+	linterval = 100
+	lazimuth = 0
+	llat2 = needs_help_latitude
+	llng2 = needs_help_longitude
+	llat1 = lend_help_latitude
+	llng1 = lend_help_longitude
+	#print(llat1, llng1)
+	#print("2nd", llat2, "2nd",llng2)
+	getStraightline(linterval,lazimuth,llat1,llng1,llat2,llng2)
+	
 	#print("@@@@@@@@@@@@")
-	#return '0002'
+	return closest_mfr_id
 
 def stitchdata(ipmsg):
     global counter
@@ -128,14 +194,19 @@ def stitchdata(ipmsg):
                     pass
             #print groupby_time'''
             if 1 in df_with_flag.vital_drop.values:
+                    print("**********************************************************")
                     print("ALERT! A First Responder's vitals are dropping!")
                     closest_first_responder_id = closest(df_with_flag)
-                    print(closest_first_responder_id)
-                    #call fn to find closest 
+                    #print(closest_first_responder_id)
+                    #call fn to find closest
+                    print("**********************************************************") 
             else:
-                    print("No alerts")
+                    print("**********************************************************")
+                    print("No Alerts!")
                     print("**********************************************************")
                     pass
+
+    
 def generate_lat_long(lat, lon):
 	radius = 0.01
 	N = 20 
